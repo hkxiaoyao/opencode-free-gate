@@ -1,5 +1,6 @@
 # opencode-free-gate
 # 开放代码自由门
+# 开放代码自由门
 
 [opencode.ai/zen](https://opencode.ai) 免费模型的**自动代理反代网关**。
 
@@ -28,7 +29,8 @@ PORT=8080 bun run gate.ts
 服务默认在 `http://localhost:13339` 启动。
 
 在 [CC-switch](https://github.com/farion1231/cc-switch) 里配置给 Claude code 使用
-<img width="2339" height="1656" alt="shot-2026-06-02_16 18 59" src="https://github.com/user-attachments/assets/c1b8af35-1ae1-4f28-a10b-9dfb9191d280" />
+ <img width  宽度="2339" height  高度="1656" alt  选一="shot-2026-06-02_16 20 43" src  来源="https://github.com/user-attachments/assets/42e5872c-4631-4ff9-9c72-4886f56d9aa7" />
+
 
 
 ---
