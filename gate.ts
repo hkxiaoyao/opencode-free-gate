@@ -53,6 +53,7 @@ const PROXY_REFRESH_MS = parseInt(process.env.PROXY_REFRESH_MS || '300000');
 const BLACKLIST_TTL = parseInt(process.env.BLACKLIST_TTL || '600000'); // 黑名单 10 分钟过期
 const SOFT_OVERFLOW_MAX = parseInt(process.env.SOFT_OVERFLOW_MAX || '6'); // 单代理软溢出上限
 const PROBE_CONCURRENCY = parseInt(process.env.PROBE_CONCURRENCY || '5'); // 并行探活数
+const POOL_LOW_THRESHOLD = parseInt(process.env.POOL_LOW_THRESHOLD || '3'); // 池子低于此值触发补位
 
 // –– ZenProxy 备用通道：池子全挂时回退到 /api/relay 转发
 //    部署示例: ZENPROXY_KEY=xxxx bun run gate.ts
@@ -254,12 +255,18 @@ function scheduleRefill(): void {
     .then(async () => {
       if (candidates.length === 0) await loadCandidates();
       await fillActive();
+      // 池子仍不够：再补一轮
+      if (active.length < POOL_LOW_THRESHOLD && candidates.length > 0) {
+        await fillActive();
+      }
     })
     .catch((e: any) => {
       console.error(`[填] refill error: ${e.message}`);
     })
     .finally(() => {
       refillInProgress = false;
+      // 补位结束后如果池子仍低，再触发一轮
+      if (active.length < POOL_LOW_THRESHOLD) scheduleRefill();
     });
 }
 
@@ -332,10 +339,11 @@ function retire(addr: string): void {
 function collectHeaders(req: Request): Record<string, string> {
   const h: Record<string, string> = {};
   for (const k of FORWARD) {
+    if (k === 'authorization') continue; // authorization 始终由 KEY 决定
     const v = req.headers.get(k);
     if (v) h[k] = v;
   }
-  if (!h['authorization']) h['authorization'] = `Bearer ${API_KEY}`;
+  h['authorization'] = `Bearer ${API_KEY}`;
   if (!h['x-opencode-client']) h['x-opencode-client'] = 'cli';
   if (!h['content-type']) h['content-type'] = 'application/json';
   return h;
@@ -470,6 +478,9 @@ async function dispatch(
   if (active.length === 0) {
     await fillActive();
   }
+
+  // 池子偏低：异步补位（不阻塞当前请求）
+  if (active.length < POOL_LOW_THRESHOLD) scheduleRefill();
 
   const p = acquireProxy();
   if (!p) {
