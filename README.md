@@ -22,6 +22,12 @@ bun run gate.ts
 
 # 指定端口
 PORT=8080 bun run gate.ts
+
+# 启用 ZenProxy 备用通道（池子全挂时自动回退）
+ZENPROXY_KEY=你的API_Key bun run gate.ts
+
+# 调试：强制所有请求走 ZenProxy relay（跳过代理池）
+FORCE_RELAY=1 ZENPROXY_KEY=你的API_Key bun run gate.ts
 ```
 
 服务默认在 `http://localhost:13339` 启动。
@@ -90,6 +96,19 @@ curl http://localhost:13339/openai/v1/models \
 | 变量 | 默认 | 说明 |
 |---|---|---|
 | `PORT` | `13339` | 监听端口 |
+| `ZENPROXY_KEY` | 空 | 启用 ZenProxy 备用通道（[申请 Key](https://zenproxy.top)） |
+| `ZENPROXY_RELAY` | `https://zenproxy.top/api/relay` | 自定义 relay 端点 |
+| `FORCE_RELAY` | `0` | 设为 `1` 跳过代理池强制走 ZenProxy（调试用） |
+
+### 关于 ZenProxy 备用通道
+
+主路径（免费代理池）失败时，自动回退到 ZenProxy 的 `/api/relay` 转发。回退触发条件：
+
+1. 启动时 `proxy.amux.ai` 拉不到代理
+2. 池子里的代理全部进入黑名单
+3. 连续 3 轮重试都失败
+
+⚠️ 备用通道会**剥离客户端的 `Authorization` 头**再转发，避免 `Bearer public` 这类占位 token 被 opencode 拒绝。
 
 ---
 

@@ -29,6 +29,12 @@ const MAX_RETRIES = 3;
 const POLL_INTERVAL = 5 * 60 * 1000;
 const TIMEOUT = 120000;
 
+// –– ZenProxy 备用通道：池子全挂时回退到 /api/relay 转发
+//    部署示例: ZENPROXY_KEY=xxxx bun run gate.ts
+const ZENPROXY_RELAY = process.env.ZENPROXY_RELAY || 'https://zenproxy.top/api/relay';
+const ZENPROXY_KEY = process.env.ZENPROXY_KEY || '';
+const FORCE_RELAY = process.env.FORCE_RELAY === '1';   // 调试用：跳过代理池直接走 relay
+
 let pool: ProxyItem[] = [];
 let cursor = 0;
 let blacklist = new Set<string>();
@@ -52,15 +58,25 @@ const FORWARD = [
 // ––––––––––––––––––––––––––––––––––––––––––––––––––––
 
 async function loadPool(): Promise<void> {
-  const res = await fetch(PROXY_API);
-  const all: any[] = await res.json();
-  pool = all
-    .filter((p) => p.quality_grade === 'S' && p.status === 'active')
-    .sort((a, b) => a.latency - b.latency);
-  cursor = 0;
-  blacklist.clear();
-  current = null;
-  console.log(`[池] ${pool.length} 个 S 级代理`);
+  // 5s 拿不到代理池就放弃（避免本机不可达时挂死）
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 5000);
+  try {
+    const res = await fetch(PROXY_API, { signal: ctl.signal });
+    const all: any[] = await res.json();
+    pool = all
+      .filter((p) => p.quality_grade === 'S' && p.status === 'active')
+      .sort((a, b) => a.latency - b.latency);
+    cursor = 0;
+    blacklist.clear();
+    current = null;
+    console.log(`[池] ${pool.length} 个 S 级代理`);
+  } catch (e: any) {
+    pool = [];   // 拉不到就清空，让上层走 ZenProxy fallback
+    console.warn(`[池] 拉取失败: ${e.message}`);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /** 无当前代理时选一个；已有则直接返回 true */
@@ -181,9 +197,18 @@ async function proxy(
 ): Promise<Response> {
   if (!pool.length) await loadPool();
 
+  if (FORCE_RELAY) {
+    if (ZENPROXY_KEY) return proxyViaRelay(path, method, headers, body);
+    return new Response('{"error":"FORCE_RELAY 但未配置 ZENPROXY_KEY"}', { status: 502, headers: { 'content-type': 'application/json' } });
+  }
+
   if (!selectProxy()) {
     await loadPool();
     if (!selectProxy()) {
+      if (ZENPROXY_KEY) {
+        console.log(`[回退] 无可用代理 → ZenProxy relay`);
+        return proxyViaRelay(path, method, headers, body);
+      }
       return new Response('{"error":"没有可用代理"}', { status: 502, headers: { 'content-type': 'application/json' } });
     }
   }
@@ -213,11 +238,48 @@ async function proxy(
     drop(addr);
     current = null;
     if (retry < MAX_RETRIES) return proxy(path, method, headers, body, retry + 1);
+    if (ZENPROXY_KEY) {
+      console.log(`[回退] 池耗尽 → ZenProxy relay`);
+      return proxyViaRelay(path, method, headers, body);
+    }
     return new Response(JSON.stringify({ error: `所有代理失败: ${e.message}` }), {
       status: 502,
       headers: { 'content-type': 'application/json' },
     });
   }
+}
+
+/** 回退通道：通过 ZenProxy /api/relay 转发（无代理也能用）
+ *  关键：剥离 Authorization 头（Bearer public 会被 opencode 拒）
+ *        同时把请求体作为 POST 转发给 relay
+ */
+async function proxyViaRelay(
+  path: string,
+  method: string,
+  headers: Record<string, string>,
+  body: string | undefined,
+): Promise<Response> {
+  // 剥离会破坏转发的头
+  const clean: Record<string, string> = { ...headers };
+  delete clean['authorization'];
+  delete clean['host'];
+  delete clean['content-length'];
+
+  const target = `${UPSTREAM}${path}`;
+  const url = `${ZENPROXY_RELAY}?api_key=${encodeURIComponent(ZENPROXY_KEY)}` +
+              `&url=${encodeURIComponent(target)}&method=${method}`;
+
+  const res = await fetch(url, {
+    method: 'POST',  // relay 端点固定用 POST 接收
+    headers: clean,
+    body: body,      // GET 时 body 为 undefined
+  });
+
+  // 原样透传上游响应（含 SSE 流）
+  return new Response(res.body, {
+    status: res.status,
+    headers: res.headers,
+  });
 }
 
 // ––––––––––––––––––––––––––––––––––––––––––––––––––––
@@ -238,6 +300,7 @@ function normalize(raw: string): string | null {
 console.log(`[门] http://localhost:${PORT}`);
 console.log(`[门] OpenAI:    /openai/v1/chat/completions | /openai/v1/models`);
 console.log(`[门] Anthropic: /anthropic/v1/messages`);
+console.log(`[门] 备用:      ${ZENPROXY_KEY ? `ZenProxy relay 已启用 (${ZENPROXY_RELAY})` : '未配置 ZENPROXY_KEY'}`);
 
 Bun.serve({
   port: PORT,
