@@ -516,11 +516,21 @@ async function dispatch(
     try {
       agent.destroy();
     } catch {}
+
+    // 上游 5xx：代理没毛病，不罚分，直接返回错误给客户端
+    if (status >= 500) {
+      releaseProxy(p);
+      p.totalSuccesses++;
+      p.consecutiveFailures = 0;
+      return new Response(respBody, {
+        status,
+        headers: { 'content-type': 'application/json; charset=utf-8' },
+      });
+    }
+
     releaseProxy(p);
     p.totalSuccesses++;
     p.consecutiveFailures = 0;
-
-    if (status >= 500) throw new Error(`上游 ${status}`);
 
     return new Response(respBody, {
       status,
