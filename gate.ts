@@ -421,9 +421,12 @@ function doHttpsStream(
 function wrapStreamWithPenalty(stream: ReadableStream<Uint8Array>, addr: string, onRelease: () => void): ReadableStream<Uint8Array> {
   let released = false;
   const safeRelease = () => { if (!released) { released = true; onRelease(); } };
+  let penalized = false;
+  const safePenalize = (reason: string) => { if (!penalized) { penalized = true; penalize(addr, reason); } };
+  let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
   return new ReadableStream<Uint8Array>({
     async start(controller) {
-      const reader = stream.getReader();
+      reader = stream.getReader();
       try {
         while (true) {
           const { done, value } = await reader.read();
@@ -435,20 +438,21 @@ function wrapStreamWithPenalty(stream: ReadableStream<Uint8Array>, addr: string,
           controller.enqueue(value);
         }
       } catch (e: any) {
-        penalize(addr, `stream-error: ${e.message ?? e}`);
+        safePenalize(`stream-error: ${e.message ?? e}`);
         safeRelease();
         controller.error(e);
       } finally {
         try {
-          reader.releaseLock();
+          reader?.releaseLock();
         } catch {}
       }
     },
     cancel(reason) {
-      penalize(addr, `client-cancel: ${reason ?? ''}`);
+      safePenalize(`client-cancel: ${reason ?? ''}`);
       safeRelease();
       try {
-        stream.cancel();
+        // 通过 reader 取代 stream.cancel()，避免 locked stream 报错
+        reader?.cancel(reason);
       } catch {}
     },
   });
