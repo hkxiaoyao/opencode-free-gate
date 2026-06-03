@@ -55,7 +55,6 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          registry: ${{ env.REGISTRY }}
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           # 标签策略
           tags: |
@@ -71,8 +70,8 @@ jobs:
             type=ref,event=tag
             # 短 SHA: 5b67eaa
             type=sha,format=short
-            # 镜像构建日期
-            type=date,pattern=%Y%m%d,enable={{is_default_branch}}
+            # 镜像构建日期（使用 raw 类型手动添加）
+            type=raw,value={{date 'YYYYMMDD'}},enable={{is_default_branch}}
           # 容器标签（被 labels 字段消费）
           labels: |
             org.opencontainers.image.title=opencode-free-gate
