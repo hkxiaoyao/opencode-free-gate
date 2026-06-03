@@ -262,9 +262,16 @@ async function proxyViaRelay(
 ): Promise<Response> {
   // 剥离会破坏转发的头
   const clean: Record<string, string> = { ...headers };
-  delete clean['authorization'];
   delete clean['host'];
   delete clean['content-length'];
+
+  // KEY 为默认值 public 时剥离 Authorization（避免占位符被拒绝）
+  // KEY 为自定义值时用环境变量覆盖（保留有效 Key）
+  if (API_KEY === 'public') {
+    delete clean['authorization'];
+  } else {
+    clean['authorization'] = `Bearer ${API_KEY}`;
+  }
 
   const target = `${UPSTREAM}${path}`;
   const url = `${ZENPROXY_RELAY}?api_key=${encodeURIComponent(ZENPROXY_KEY)}` +

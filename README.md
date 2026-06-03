@@ -180,7 +180,9 @@ docker restart opencode-gate
 2. 池子里的代理全部进入黑名单
 3. 连续 3 轮重试都失败
 
-⚠️ 备用通道会**剥离客户端的 `Authorization` 头**再转发，避免 `Bearer public` 这类占位 token 被 opencode 拒绝。
+⚠️ 备用通道的 Authorization 处理：
+- `KEY=public`（默认）时，会**剥离**客户端的 Authorization 头，避免占位 token 被 opencode 拒绝
+- `KEY=自定义值` 时，会**用环境变量的 KEY 覆盖**客户端的 Authorization，保留有效 Key
 
 ---
 
