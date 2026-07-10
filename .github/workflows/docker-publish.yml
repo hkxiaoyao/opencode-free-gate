@@ -10,10 +10,7 @@ name: docker
 
 on:
   push:
-    branches: [main]
     tags: ['v*']
-  pull_request:
-    branches: [main]
   workflow_dispatch:
 
 # 避免并发构建互相覆盖
@@ -58,20 +55,16 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           # 标签策略
           tags: |
-            # 默认 latest
-            type=raw,value=latest,enable={{is_default_branch}}
-            # 完整版本号: v0.2.0
+            # 默认 latest（tag 推送时始终更新）
+            type=raw,value=latest
+            # 完整版本号: v1.0.1
             type=semver,pattern=v{{version}}
-            # 主版本: v0
+            # 主版本: v1
             type=semver,pattern=v{{major}}
-            # 分支名: main
-            type=ref,event=branch
-            # 标签名: v0.2.0
+            # 标签名: v1.0.1
             type=ref,event=tag
             # 短 SHA: 5b67eaa
             type=sha,format=short
-            # 镜像构建日期（使用 raw 类型手动添加）
-            type=raw,value={{date 'YYYYMMDD'}},enable={{is_default_branch}}
           # 容器标签（被 labels 字段消费）
           labels: |
             org.opencontainers.image.title=opencode-free-gate
