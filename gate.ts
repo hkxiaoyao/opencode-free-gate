@@ -375,6 +375,25 @@ async function dispatch(
     const { status, body: respBody } = await doHttps(path, method, headers, body, agent);
     try { agent.destroy(); } catch {}
 
+    // 429 限流：丢弃该 slot，换 IP 重试
+    if (status === 429) {
+      console.log(`[429] ${slot.addr} 被限流，换IP重试`);
+      dropSlot(slot.addr);
+      if (retry < MAX_RETRIES) {
+        return dispatch(path, method, headers, body, retry + 1, triedAddrs);
+      }
+      // 重试耗尽 → 尝试 ZenProxy
+      if (ZENPROXY_KEY) {
+        console.log(`[回退] 429重试耗尽 → ZenProxy relay`);
+        return proxyViaRelay(path, method, headers, body);
+      }
+      // 没有 ZenProxy → 尝试自定义代理兜底
+      if (customSlots.length > 0) {
+        console.log(`[回退] 429重试耗尽 → 自定义代理兜底`);
+        return dispatchViaCustom(path, method, headers, body);
+      }
+    }
+
     // 上游 5xx：代理没毛病，不丢弃，直接返回
     if (status >= 500) {
       return new Response(respBody, { status, headers: { 'content-type': 'application/json; charset=utf-8' } });
